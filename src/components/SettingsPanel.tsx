@@ -18,7 +18,6 @@ export function SettingsPanel({ settings, onChange, disabled }: Props) {
 
   return (
     <div className="bg-dark-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5">
-      {/* Mode */}
       <div>
         <label className="block text-xs font-medium text-slate-400 mb-2">Mode Proses</label>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -42,7 +41,6 @@ export function SettingsPanel({ settings, onChange, disabled }: Props) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Scale */}
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-2">Skala</label>
           <div className="flex gap-2">
@@ -64,7 +62,6 @@ export function SettingsPanel({ settings, onChange, disabled }: Props) {
           </div>
         </div>
 
-        {/* Quality */}
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-2">Model AI</label>
           <select
@@ -73,13 +70,12 @@ export function SettingsPanel({ settings, onChange, disabled }: Props) {
             onChange={(e) => set('quality', e.target.value as QualityModel)}
             className="w-full py-2.5 px-3 rounded-xl bg-dark-800 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
           >
-            <option value="slim">Cepat (Slim)</option>
+            <option value="slim">Cepat (Slim) — disarankan</option>
             <option value="medium">Seimbang (Medium)</option>
-            <option value="thick">Maksimal (Thick)</option>
+            <option value="thick">Maksimal (Thick) — lambat</option>
           </select>
         </div>
 
-        {/* Patch */}
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-2">Patch Size</label>
           <select
@@ -88,16 +84,19 @@ export function SettingsPanel({ settings, onChange, disabled }: Props) {
             onChange={(e) => set('patchSize', Number(e.target.value))}
             className="w-full py-2.5 px-3 rounded-xl bg-dark-800 border border-slate-700 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
           >
-            <option value={64}>64 – Cepat</option>
-            <option value={96}>96 – Seimbang</option>
-            <option value={128}>128 – Kualitas Tinggi</option>
+            <option value={32}>32 – Paling aman</option>
+            <option value={64}>64 – Disarankan</option>
+            <option value={96}>96 – Lebih bagus</option>
+            <option value={128}>128 – Berat (bisa hang)</option>
           </select>
         </div>
       </div>
 
-      <p className="text-xs text-slate-500">
-        Tip: <strong className="text-sky-400">Thick + 128 + 2×</strong> = hasil paling tajam. 4× lebih lambat & butuh RAM lebih besar.
-      </p>
+      <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-200/90 leading-relaxed">
+        <strong>Penting:</strong> Foto besar (1080p+) + <strong>Thick + 4× + patch 128</strong> sering
+        macet di browser (RAM penuh). Mulai dengan <strong>Slim + 2× + patch 64</strong>. Model Thick
+        otomatis dibatasi patch & ukuran agar tidak freeze.
+      </div>
     </div>
   )
 }

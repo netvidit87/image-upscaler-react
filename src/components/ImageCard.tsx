@@ -24,9 +24,12 @@ export function ImageCard({ item, onRemove, onSelect, selected }: Props) {
           className="max-w-full max-h-full object-contain"
         />
         {item.status === 'processing' && (
-          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+          <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 px-3">
             <Loader2 className="w-8 h-8 text-sky-400 animate-spin" />
             <span className="text-sm font-medium text-sky-300">{Math.round(item.progress * 100)}%</span>
+            {item.progressLabel && (
+              <span className="text-[11px] text-slate-300 text-center leading-snug">{item.progressLabel}</span>
+            )}
           </div>
         )}
         {item.status === 'done' && (
@@ -62,7 +65,7 @@ export function ImageCard({ item, onRemove, onSelect, selected }: Props) {
           </button>
         </div>
         {item.status === 'error' && (
-          <p className="text-xs text-red-400">{item.error}</p>
+          <p className="text-xs text-red-400 break-words">{item.error}</p>
         )}
         {item.status === 'done' && item.resultSrc && (
           <div className="flex gap-2">
@@ -93,7 +96,7 @@ export function ImageCard({ item, onRemove, onSelect, selected }: Props) {
           <div className="w-full h-1.5 bg-dark-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-sky-500 to-blue-400 transition-all"
-              style={{ width: `${item.progress * 100}%` }}
+              style={{ width: `${Math.max(2, item.progress * 100)}%` }}
             />
           </div>
         )}

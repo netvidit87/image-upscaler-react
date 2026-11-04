@@ -15,6 +15,7 @@ export interface ImageItem {
   resultHeight?: number
   status: 'idle' | 'processing' | 'done' | 'error'
   progress: number
+  progressLabel?: string
   error?: string
   elapsedSec?: number
 }

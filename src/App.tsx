@@ -19,8 +19,8 @@ export default function App() {
   const [settings, setSettings] = useState<ProcessSettings>({
     mode: 'upscale',
     scale: 2,
-    quality: 'thick',
-    patchSize: 96,
+    quality: 'slim',
+    patchSize: 64,
   })
 
   const selected = items.find((i) => i.id === selectedId) || items[0] || null
@@ -97,7 +97,8 @@ export default function App() {
         scale: settings.scale,
         patchSize: settings.patchSize,
         mode: settings.mode,
-        onProgress: (p) => updateItem(item.id, { progress: p }),
+        onProgress: (p, label) =>
+          updateItem(item.id, { progress: p, progressLabel: label || undefined }),
       })
       // measure result size
       const dims = await new Promise<{ w: number; h: number }>((res) => {

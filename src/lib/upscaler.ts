@@ -9,19 +9,27 @@ import x4Thick from '@upscalerjs/esrgan-thick/4x'
 import type { QualityModel, ScaleOption, ProcessMode } from '../types'
 
 let tfReady = false
+let backendName = 'unknown'
 
 export async function ensureTf() {
-  if (tfReady) return
+  if (tfReady) return backendName
   await tf.ready()
-  // Prefer WebGL for speed
   try {
     await tf.setBackend('webgl')
     await tf.ready()
   } catch {
-    // fallback default
+    // cpu fallback
+  }
+  // free unused tensors aggressively
+  try {
+    tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0)
+  } catch {
+    /* ignore */
   }
   tfReady = true
-  console.log('[AI] TF backend:', tf.getBackend())
+  backendName = tf.getBackend()
+  console.log('[AI] TF backend:', backendName)
+  return backendName
 }
 
 function getModel(quality: QualityModel, scale: ScaleOption) {
@@ -30,10 +38,45 @@ function getModel(quality: QualityModel, scale: ScaleOption) {
   return scale === 4 ? x4Slim : x2Slim
 }
 
-/**
- * Canvas-based unsharp mask (sharpen) – free extra post-process
- */
-export function sharpenCanvas(src: string, amount = 0.6, radius = 1): Promise<string> {
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Gagal memuat gambar'))
+    img.src = src
+  })
+}
+
+/** Resize so upscale output stays browser-friendly */
+export async function fitImageForUpscale(
+  src: string,
+  scale: number,
+  maxOutSide = 2048,
+): Promise<{ src: string; width: number; height: number; resized: boolean }> {
+  const img = await loadHtmlImage(src)
+  const w = img.naturalWidth
+  const h = img.naturalHeight
+  const outW = w * scale
+  const outH = h * scale
+  const maxSide = Math.max(outW, outH)
+  if (maxSide <= maxOutSide) {
+    return { src, width: w, height: h, resized: false }
+  }
+  const factor = maxOutSide / maxSide
+  const nw = Math.max(1, Math.round(w * factor))
+  const nh = Math.max(1, Math.round(h * factor))
+  const canvas = document.createElement('canvas')
+  canvas.width = nw
+  canvas.height = nh
+  const ctx = canvas.getContext('2d')!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, 0, 0, nw, nh)
+  return { src: canvas.toDataURL('image/png'), width: nw, height: nh, resized: true }
+}
+
+export function sharpenCanvas(src: string, amount = 0.55, radius = 0.8): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
@@ -46,7 +89,6 @@ export function sharpenCanvas(src: string, amount = 0.6, radius = 1): Promise<st
       const ctx = canvas.getContext('2d')!
       ctx.drawImage(img, 0, 0)
 
-      // Simple high-pass via blur + blend
       const blurred = document.createElement('canvas')
       blurred.width = w
       blurred.height = h
@@ -74,9 +116,6 @@ export function sharpenCanvas(src: string, amount = 0.6, radius = 1): Promise<st
   })
 }
 
-/**
- * Light denoise via canvas (bilateral-ish approximation) – no extra model needed
- */
 export function lightDenoise(src: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -88,11 +127,10 @@ export function lightDenoise(src: string): Promise<string> {
       canvas.width = w
       canvas.height = h
       const ctx = canvas.getContext('2d')!
-      // slight blur then blend with original for denoise look
-      ctx.filter = 'blur(0.6px)'
+      ctx.filter = 'blur(0.5px)'
       ctx.drawImage(img, 0, 0)
       ctx.filter = 'none'
-      ctx.globalAlpha = 0.45
+      ctx.globalAlpha = 0.5
       ctx.drawImage(img, 0, 0)
       ctx.globalAlpha = 1
       resolve(canvas.toDataURL('image/png'))
@@ -102,66 +140,139 @@ export function lightDenoise(src: string): Promise<string> {
   })
 }
 
+function yieldToUI() {
+  return new Promise<void>((r) => setTimeout(r, 30))
+}
+
 export interface UpscaleOptions {
   src: string
   quality: QualityModel
   scale: ScaleOption
   patchSize: number
   mode: ProcessMode
-  onProgress?: (p: number) => void
+  onProgress?: (p: number, label?: string) => void
   signal?: AbortSignal
 }
 
 export async function processImage(opts: UpscaleOptions): Promise<string> {
+  const onProgress = opts.onProgress || (() => {})
+
+  onProgress(0.02, 'Menyiapkan TensorFlow…')
   await ensureTf()
+  await yieldToUI()
 
   let workingSrc = opts.src
 
-  // Pre-denoise if mode is denoise or as optional first step
+  // Fit image so Thick/4x does not freeze browser
+  onProgress(0.04, 'Menyesuaikan ukuran gambar…')
+  const maxOut = opts.quality === 'thick' ? 1600 : opts.quality === 'medium' ? 2048 : 2560
+  const fitted = await fitImageForUpscale(workingSrc, opts.scale, maxOut)
+  workingSrc = fitted.src
+  if (fitted.resized) {
+    console.log('[AI] input di-resize ke', fitted.width, 'x', fitted.height, 'agar aman di browser')
+  }
+  await yieldToUI()
+
   if (opts.mode === 'denoise') {
-    opts.onProgress?.(0.05)
+    onProgress(0.06, 'Denoise…')
     workingSrc = await lightDenoise(workingSrc)
+    await yieldToUI()
   }
 
+  // Safer patch size (thick + large patch = hang)
+  let patch = opts.patchSize
+  if (opts.quality === 'thick') patch = Math.min(patch, 64)
+  if (opts.scale === 4) patch = Math.min(patch, 64)
+  if (opts.quality === 'medium') patch = Math.min(patch, 96)
+  patch = Math.max(32, patch)
+
+  onProgress(0.08, `Memuat model AI (${opts.quality} ${opts.scale}×)…`)
+  await yieldToUI()
+
   const model = getModel(opts.quality, opts.scale)
-  const upscaler = new Upscaler({ model })
+  const upscaler = new Upscaler({
+    model,
+    // avoid hanging on slow first inference
+  })
 
   try {
     if (opts.signal?.aborted) throw new Error('Dibatalkan')
 
-    // Warmup helps first run
+    // NO warmup — sering bikin hang di browser + model thick
+    onProgress(0.1, 'Memproses patch…')
+    await yieldToUI()
+
+    // Pass HTMLImageElement (lebih stabil dari dataURL panjang)
+    const inputImg = await loadHtmlImage(workingSrc)
+
+    let lastP = 0.1
+    let result: string
     try {
-      await upscaler.warmup([{ patchSize: Math.min(opts.patchSize, 64), padding: 4 }])
-    } catch {
-      // ignore warmup failures
+      result = (await upscaler.upscale(inputImg, {
+        output: 'base64',
+        patchSize: patch,
+        padding: 4,
+        progress: (percent: number) => {
+          // percent usually 0..1
+          const p = typeof percent === 'number' ? percent : 0
+          const mapped = 0.1 + Math.min(1, Math.max(0, p)) * 0.8
+          if (mapped - lastP >= 0.01 || mapped >= 0.89) {
+            lastP = mapped
+            onProgress(mapped, `AI upscale ${Math.round(p * 100)}%`)
+          }
+        },
+      })) as string
+    } catch (e1) {
+      console.warn('[AI] upscale attempt 1 failed, retry smaller patch', e1)
+      onProgress(0.12, 'Retry patch lebih kecil…')
+      // free memory
+      try {
+        tf.disposeVariables?.()
+      } catch {
+        /* */
+      }
+      await yieldToUI()
+      result = (await upscaler.upscale(inputImg, {
+        output: 'base64',
+        patchSize: 32,
+        padding: 2,
+        progress: (percent: number) => {
+          const p = typeof percent === 'number' ? percent : 0
+          onProgress(0.12 + Math.min(1, Math.max(0, p)) * 0.78, `Retry ${Math.round(p * 100)}%`)
+        },
+      })) as string
     }
 
-    opts.onProgress?.(0.1)
-
-    let result = await upscaler.upscale(workingSrc, {
-      output: 'base64',
-      patchSize: opts.patchSize,
-      padding: 6,
-      progress: (percent) => {
-        // map 0-1 to 0.1-0.9
-        opts.onProgress?.(0.1 + percent * 0.8)
-      },
-    })
-
-    // Post sharpen for "sharpen" mode or always light sharpen for upscale
-    if (opts.mode === 'sharpen' || opts.mode === 'upscale') {
-      opts.onProgress?.(0.92)
-      const amount = opts.mode === 'sharpen' ? 0.85 : 0.35
-      result = await sharpenCanvas(result, amount, 1)
+    if (opts.mode === 'sharpen' || opts.mode === 'upscale' || opts.mode === 'denoise') {
+      onProgress(0.92, 'Sharpen akhir…')
+      const amount = opts.mode === 'sharpen' ? 0.8 : 0.4
+      result = await sharpenCanvas(result, amount, 0.8)
     }
 
-    opts.onProgress?.(1)
+    onProgress(1, 'Selesai')
     return result
+  } catch (err) {
+    console.error('[AI] processImage error', err)
+    const msg =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'string'
+          ? err
+          : 'Gagal memproses (mungkin RAM penuh — coba Slim + 2× + patch 64)'
+    throw new Error(msg)
   } finally {
     try {
       await upscaler.dispose()
     } catch {
-      // ignore
+      /* ignore */
+    }
+    try {
+      // help GC
+      if (tf.memory) {
+        console.log('[AI] tf memory', tf.memory())
+      }
+    } catch {
+      /* */
     }
   }
 }
