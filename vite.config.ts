@@ -7,14 +7,6 @@ export default defineConfig({
     include: ['@tensorflow/tfjs', 'upscaler'],
   },
   build: {
-    chunkSizeWarningLimit: 3000,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          tfjs: ['@tensorflow/tfjs'],
-          upscaler: ['upscaler'],
-        },
-      },
-    },
+    chunkSizeWarningLimit: 4000,
   },
 })
